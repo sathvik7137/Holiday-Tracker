@@ -1,0 +1,290 @@
+const axios = require('axios');
+const moment = require('moment');
+
+class HolidayService {
+  constructor() {
+    this.apiKey = process.env.CALENDARIFIC_API_KEY;
+    this.baseUrl = process.env.HOLIDAY_API_BASE_URL || 'https://calendarific.com/api/v2';
+    this.apiProvider = process.env.HOLIDAY_API_PROVIDER || 'calendarific';
+    
+    if (!this.apiKey) {
+      console.warn('⚠️  WARNING: CALENDARIFIC_API_KEY not found in environment variables');
+      console.warn('   📝 To get your free API key:');
+      console.warn('   1. Visit: https://calendarific.com/');
+      console.warn('   2. Sign up for free account (1000 requests/month)');
+      console.warn('   3. Copy API key from dashboard');
+      console.warn('   4. Add to .env file: CALENDARIFIC_API_KEY=your_key_here');
+      console.warn('   🔄 Using fallback mock data for now...');
+    } else {
+      console.log('✅ Calendarific API key configured successfully');
+    }
+  }
+
+  /**
+   * Fetches holidays from the external API
+   * @param {Object} params - Parameters for fetching holidays
+   * @param {string} params.country - Country code (ISO 3166-1 alpha-2)
+   * @param {number} params.year - Year
+   * @param {number} [params.month] - Month (1-12)
+   * @param {string} [params.startDate] - Start date (YYYY-MM-DD)
+   * @param {string} [params.endDate] - End date (YYYY-MM-DD)
+   * @returns {Promise<Array>} Array of holiday objects
+   */
+  async getHolidays({ country, year, month = null, startDate = null, endDate = null }) {
+    try {
+      if (!this.apiKey && this.apiProvider === 'calendarific') {
+        console.warn('🔄 No API key found, using mock data');
+        return this.getMockHolidays({ country, year, month });
+      }
+
+      console.log(`🌐 Fetching holidays from ${this.apiProvider.toUpperCase()} API for ${country} ${year}${month ? ` (Month: ${month})` : ''}`);
+      
+      // Support multiple API providers
+      switch (this.apiProvider) {
+        case 'calendarific':
+          return await this.getCalendarificHolidays({ country, year, month });
+        case 'abstractapi':
+          return await this.getAbstractAPIHolidays({ country, year, month });
+        case 'nager':
+          return await this.getNagerHolidays({ country, year, month });
+        default:
+          return await this.getCalendarificHolidays({ country, year, month });
+      }
+    } catch (error) {
+      console.error('❌ Error fetching holidays from API:', error.message);
+      console.warn('🔄 Falling back to mock data');
+      return this.getMockHolidays({ country, year, month });
+    }
+  }
+
+  async getCalendarificHolidays({ country, year, month }) {
+    const params = {
+      api_key: this.apiKey,
+      country: country,
+      year: year,
+      type: 'national,local,religious,observance'
+    };
+
+    if (month) {
+      params.month = month;
+    }
+
+    const response = await axios.get(`${this.baseUrl}/holidays`, {
+      params,
+      timeout: 10000
+    });
+
+    if (response.data.meta.code !== 200) {
+        throw new Error(`API Error: ${response.data.meta.error_detail || 'Unknown error'}`);
+      }
+
+      const holidays = response.data.response?.holidays || [];
+      
+      // Filter by date range if specified
+      if (startDate && endDate) {
+        return holidays.filter(holiday => {
+          const holidayDate = holiday.date.iso;
+          return holidayDate >= startDate && holidayDate <= endDate;
+        });
+      }
+
+      console.log(`✅ Successfully fetched ${holidays.length} holidays from API`);
+      return holidays;
+
+    } catch (error) {
+      console.error('❌ Error fetching holidays from API:', error.message);
+      
+      if (error.code === 'ECONNABORTED') {
+        throw new Error('Holiday API request timed out. Please try again.');
+      }
+      
+      if (error.response?.status === 401) {
+        throw new Error('Invalid API key for holiday service');
+      }
+      
+      if (error.response?.status === 429) {
+        throw new Error('Rate limit exceeded for holiday API');
+      }
+
+      // Fallback to mock data on API failure
+      console.warn('🔄 Falling back to mock data due to API error');
+      const mockData = this.getMockHolidays({ country, year, month });
+      return mockData;
+    }
+  }
+
+  /**
+   * Provides mock holiday data as fallback
+   * @param {Object} params - Parameters
+   * @returns {Array} Mock holiday data
+   */
+  getMockHolidays({ country, year, month = null }) {
+    console.log(`🎭 Using mock holiday data for ${country} ${year}${month ? ` (Month: ${month})` : ''}`);
+    
+    const mockHolidays = {
+      US: [
+        { name: "New Year's Day", date: { iso: `${year}-01-01` }, type: ['National holiday'] },
+        { name: "Martin Luther King Jr. Day", date: { iso: `${year}-01-15` }, type: ['National holiday'] },
+        { name: "Presidents' Day", date: { iso: `${year}-02-19` }, type: ['National holiday'] },
+        { name: "Memorial Day", date: { iso: `${year}-05-27` }, type: ['National holiday'] },
+        { name: "Independence Day", date: { iso: `${year}-07-04` }, type: ['National holiday'] },
+        { name: "Labor Day", date: { iso: `${year}-09-02` }, type: ['National holiday'] },
+        { name: "Columbus Day", date: { iso: `${year}-10-14` }, type: ['National holiday'] },
+        { name: "Veterans Day", date: { iso: `${year}-11-11` }, type: ['National holiday'] },
+        { name: "Thanksgiving", date: { iso: `${year}-11-28` }, type: ['National holiday'] },
+        { name: "Christmas Day", date: { iso: `${year}-12-25` }, type: ['National holiday'] },
+      ],
+      IN: [
+        { name: "Republic Day", date: { iso: `${year}-01-26` }, type: ['National holiday'] },
+        { name: "Independence Day", date: { iso: `${year}-08-15` }, type: ['National holiday'] },
+        { name: "Gandhi Jayanti", date: { iso: `${year}-10-02` }, type: ['National holiday'] },
+        { name: "Diwali", date: { iso: `${year}-11-12` }, type: ['Religious holiday'] },
+        { name: "Holi", date: { iso: `${year}-03-08` }, type: ['Religious holiday'] },
+        { name: "Eid al-Fitr", date: { iso: `${year}-04-21` }, type: ['Religious holiday'] },
+      ],
+      GB: [
+        { name: "New Year's Day", date: { iso: `${year}-01-01` }, type: ['National holiday'] },
+        { name: "Good Friday", date: { iso: `${year}-03-29` }, type: ['National holiday'] },
+        { name: "Easter Monday", date: { iso: `${year}-04-01` }, type: ['National holiday'] },
+        { name: "Early May Bank Holiday", date: { iso: `${year}-05-06` }, type: ['National holiday'] },
+        { name: "Spring Bank Holiday", date: { iso: `${year}-05-27` }, type: ['National holiday'] },
+        { name: "Summer Bank Holiday", date: { iso: `${year}-08-26` }, type: ['National holiday'] },
+        { name: "Christmas Day", date: { iso: `${year}-12-25` }, type: ['National holiday'] },
+        { name: "Boxing Day", date: { iso: `${year}-12-26` }, type: ['National holiday'] },
+      ]
+    };
+
+    let holidays = mockHolidays[country] || mockHolidays['US'];
+    
+    // Filter by month if specified
+    if (month) {
+      holidays = holidays.filter(holiday => {
+        const holidayMonth = parseInt(holiday.date.iso.split('-')[1]);
+        return holidayMonth === month;
+      });
+    }
+
+    return holidays;
+  }
+
+  /**
+   * Processes raw holiday data for calendar display
+   * @param {Array} holidays - Raw holiday data
+   * @returns {Array} Processed holiday data
+   */
+  processHolidaysForCalendar(holidays) {
+    return holidays.map(holiday => ({
+      id: `${holiday.date.iso}-${holiday.name.replace(/\s+/g, '-').toLowerCase()}`,
+      name: holiday.name,
+      date: holiday.date.iso,
+      type: Array.isArray(holiday.type) ? holiday.type.join(', ') : holiday.type,
+      description: holiday.description || '',
+      country: holiday.country || '',
+      dayOfWeek: moment(holiday.date.iso).format('dddd'),
+      weekNumber: moment(holiday.date.iso).week(),
+      month: moment(holiday.date.iso).month() + 1,
+      year: moment(holiday.date.iso).year()
+    }));
+  }
+
+  /**
+   * Groups holidays by month
+   * @param {Array} holidays - Processed holiday data
+   * @returns {Object} Holidays grouped by month
+   */
+  groupHolidaysByMonth(holidays) {
+    const grouped = {};
+    
+    holidays.forEach(holiday => {
+      const month = holiday.month;
+      if (!grouped[month]) {
+        grouped[month] = [];
+      }
+      grouped[month].push(holiday);
+    });
+
+    return grouped;
+  }
+
+  /**
+   * Generates week summary for color coding
+   * @param {Array} holidays - Raw holiday data
+   * @param {Object} params - Date parameters
+   * @returns {Array} Week summary data
+   */
+  generateWeekSummary(holidays, { year, month = null }) {
+    const processedHolidays = this.processHolidaysForCalendar(holidays);
+    const weekSummary = [];
+    
+    // Determine date range
+    const startDate = month 
+      ? moment(`${year}-${month.toString().padStart(2, '0')}-01`)
+      : moment(`${year}-01-01`);
+    
+    const endDate = month
+      ? moment(startDate).endOf('month')
+      : moment(`${year}-12-31`);
+
+    // Group holidays by week
+    const holidaysByWeek = {};
+    processedHolidays.forEach(holiday => {
+      const weekKey = moment(holiday.date).startOf('week').format('YYYY-MM-DD');
+      if (!holidaysByWeek[weekKey]) {
+        holidaysByWeek[weekKey] = [];
+      }
+      holidaysByWeek[weekKey].push(holiday);
+    });
+
+    // Generate week summary
+    let currentWeek = moment(startDate).startOf('week');
+    const finalWeek = moment(endDate).endOf('week');
+
+    while (currentWeek.isSameOrBefore(finalWeek)) {
+      const weekKey = currentWeek.format('YYYY-MM-DD');
+      const weekHolidays = holidaysByWeek[weekKey] || [];
+      
+      const colorCode = this.getWeekColorCode(weekHolidays.length);
+      
+      weekSummary.push({
+        weekStart: weekKey,
+        weekEnd: moment(currentWeek).endOf('week').format('YYYY-MM-DD'),
+        weekNumber: currentWeek.week(),
+        holidayCount: weekHolidays.length,
+        holidays: weekHolidays,
+        colorCode,
+        colorName: this.getColorName(colorCode)
+      });
+
+      currentWeek.add(1, 'week');
+    }
+
+    return weekSummary;
+  }
+
+  /**
+   * Gets color code based on holiday count
+   * @param {number} holidayCount - Number of holidays in week
+   * @returns {string} Color code
+   */
+  getWeekColorCode(holidayCount) {
+    if (holidayCount === 0) return 'none';
+    if (holidayCount === 1) return 'light-green';
+    return 'dark-green';
+  }
+
+  /**
+   * Gets color name for UI display
+   * @param {string} colorCode - Color code
+   * @returns {string} Human readable color name
+   */
+  getColorName(colorCode) {
+    const colorNames = {
+      'none': 'No Color',
+      'light-green': 'Light Green',
+      'dark-green': 'Dark Green'
+    };
+    return colorNames[colorCode] || 'Unknown';
+  }
+}
+
+module.exports = new HolidayService();
